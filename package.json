@@ -1,0 +1,27 @@
+{
+  "name": "shrinkwrap",
+  "version": "0.0.0",
+  "description": "npm shrinkwrap parser, generation and comparison",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/3rd-Eden/shrinkwrap.git"
+  },
+  "keywords": [
+    "npm",
+    "shrinkwrap"
+  ],
+  "author": "Arnout Kazemier",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/3rd-Eden/shrinkwrap/issues"
+  },
+  "dependencies": {
+    "semver": "~2.1.0",
+    "request": "~2.27.0",
+    "async": "~0.2.9"
+  }
+}
