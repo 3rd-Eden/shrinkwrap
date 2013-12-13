@@ -1,46 +1,9 @@
 'use strict';
 
-var request = require('request')
-  , semver = require('semver')
+var Version = require('./version')
+  , request = require('request')
   , async = require('async')
   , path = require('path');
-
-/**
- * A simple representation of a module's version number.
- *
- * @constructor
- * @param {String} number The version number.
- * @api public
- */
-function Version(number) {
-  this.number = number;
-}
-
-/**
- * Check if the version number is greater then the given `version`.
- *
- * @param {String} version Version number.
- * @returns {Boolean}
- * @api public
- */
-Version.prototype.gt = function gt(version) {
-  return semver.gt(this.number, version);
-};
-
-/**
- * Check if the version number is less then the given `version`.
- *
- * @param {String} version Version number.
- * @returns {Boolean}
- * @api public
- */
-Version.prototype.lt = function lt(number) {
-  return semver.lt(this.number, number);
-};
-
-Version.prototype.toString = function toString() {
-  return this.number;
-};
 
 /**
  * Generate a new shrinkwrap from a given package or module.
@@ -192,9 +155,11 @@ Shrinkwrap.prototype.module = function module(name, version, fn) {
 
     if (data.versions[version]) return fn(undefined, data.versions[version]);
 
+    //
     // @TODO the version can be 0.0.x and not be a direct match, we should do
     // semver comparisons and find the most suitable version for the given
     // version.
+    //
     fn(undefined, data.versions[version]);
   }
 
