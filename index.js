@@ -1,7 +1,7 @@
 'use strict';
 
-var Version = require('./version')
-  , request = require('request')
+var Registry = require('./registry')
+  , Version = require('./version')
   , async = require('async')
   , path = require('path');
 
@@ -15,9 +15,9 @@ var Version = require('./version')
 function Shrinkwrap(options) {
   options = options || {};
 
-  this.registry = options.registry || 'https://registry.npmjs.org/';
+  this.registry = new Registry(options.registry);
   this.output = options.output || 'npm-shrinkwrap.json';
-  this.development = options.development || false;
+  this.production = options.production || false;
   this.limit = options.limit || 10;
   this.dependencies = [];
   this.cache = Object.create(null);
@@ -110,83 +110,6 @@ Shrinkwrap.prototype.read = function read(file, fn) {
 
   if (fn) return fn(undefined, data);
   return data;
-};
-
-/**
- * Retrieve a module from the npm registry so a dependency graph can be created
- * from it.
- *
- * @param {String} name The name of the module.
- * @param {String} version The version of the module, if none provided it will be the latest
- * @param {Function} fn Callback.
- * @api private
- */
-Shrinkwrap.prototype.module = function module(name, version, fn) {
-  var shrinkwrap = this
-    , data;
-
-  if ('function' === typeof version) {
-    fn = version;
-    version = null;
-  }
-
-  /**
-   * Helper function for resolving versions, cleaning up the responses and
-   * properly executing the callback.
-   *
-   * @param {Object} data The dataset.
-   * @api private
-   */
-  function find(data) {
-    //
-    // If no version is supplied try to use the `latest` dist tag.
-    // @TODO we might want to check the `time` object for the latest as well.
-    //
-    if (!version && 'dist-tags' in data) version = data['dist-tags'].latest;
-
-    //
-    // Clean up the data structure. Some of the data we receive from the npm
-    // registry is utterly verbose and take way to much memory. These properties
-    // are removed from the package.
-    //
-    Object.keys(data.versions).forEach(function clean(version) {
-      delete data.versions[version].readme;
-    });
-
-    if (data.versions[version]) return fn(undefined, data.versions[version]);
-
-    //
-    // @TODO the version can be 0.0.x and not be a direct match, we should do
-    // semver comparisons and find the most suitable version for the given
-    // version.
-    //
-    fn(undefined, data.versions[version]);
-  }
-
-  //
-  // Check for a cache hit before we request new data from the server. In some
-  // cases the modules depend on
-  //
-  if (name in this.cache) return process.nextTick(function tock() {
-    find(this.cache[module]);
-  });
-
-  request({
-    uri: this.registry + name,
-    strictSSL: false,
-    method: 'GET'
-  }, function get(err, res, body) {
-    if (err) return fn(err);
-    if (res.statusCode !== 200) return fn(new Error('Invalid status code received'));
-
-    try { data = JSON.parse(body); }
-    catch (e) { return fn(new Error('Invalid JSON: '+ e.message)); }
-
-    if ('string' === typeof data) return fn(new Error('Invalid response type'));
-    if (!('versions' in data)) return fn(new Error('Invalid data structure'));
-
-    find(data);
-  });
 };
 
 /**
