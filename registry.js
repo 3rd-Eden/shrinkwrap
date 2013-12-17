@@ -45,7 +45,13 @@ Registry.prototype.releases = function releases(name, fn) {
     //
     if ('dist-tags' in data) Object.keys(data['dist-tags']).forEach(function (key) {
       var version = data['dist-tags'][key]
-        , release = data.versions[version];
+        , release = JSON.parse(JSON.stringify(data.versions[version]));
+
+      //
+      // The JSON.parse(JSON.stringify)) is needed to create a full clone of the
+      // data structure as we're adding tags. That would be override during the
+      // `reduce` procedure.
+      //
 
       release.date = data.time[version];
       release.tag = key;
@@ -79,9 +85,13 @@ Registry.prototype.releases = function releases(name, fn) {
  * @param {Function} fn The callback.
  * @api public
  */
-Registry.prototype.release = function release(name, version, fn) {
+Registry.prototype.release = function release(name, range, fn) {
   return this.releases(name, function releases(err, versions) {
-    if (version in versions) return fn(undefined, versions[version]);
+    if (err) return fn(err);
+    if (range in versions) return fn(undefined, versions[range]);
+
+    var version = semver.maxSatisfying(Object.keys(versions), range);
+    fn(undefined, versions[version]);
   });
 };
 
