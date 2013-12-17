@@ -2,7 +2,7 @@
 
 var Assignment = require('assign')
   , request = require('request')
-  , semver = require('semver')
+  , semver = require('./semver')
   , url = require('url');
 
 /**
@@ -22,7 +22,7 @@ function Registry(options) {
 /**
  * Retrieve all release specific information for the given package name.
  *
- * @param {String} name The package name
+ * @param {String} name The package name.
  * @param {Function} fn The callback.
  * @api public
  */
@@ -50,7 +50,6 @@ Registry.prototype.releases = function releases(name, fn) {
       release.date = data.time[version];
       release.tag = key;
 
-      console.log('release', release);
       add(release);
     });
 
@@ -72,6 +71,14 @@ Registry.prototype.releases = function releases(name, fn) {
   }, {});
 };
 
+/**
+ * Get a version for a specific release.
+ *
+ * @param {String} name The name of the package.
+ * @param {String} version The version number we should retrieve.
+ * @param {Function} fn The callback.
+ * @api public
+ */
 Registry.prototype.release = function release(name, version, fn) {
   return this.releases(name, function releases(err, versions) {
     if (version in versions) return fn(undefined, versions[version]);
