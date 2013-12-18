@@ -2,94 +2,179 @@
 
 var Registry = require('./registry')
   , Version = require('./version')
+  , semver = require('./semver')
   , async = require('async')
-  , path = require('path');
+  , path = require('path')
+  , fs = require('fs');
 
 /**
  * Generate a new shrinkwrap from a given package or module.
  *
+ * Options:
+ *
+ * - registry: URL of the npm registry we should use to read package information.
+ * - production: Should we only include production packages.
+ * - limit: Amount of parallel processing tasks we could use to retrieve data.
+ *
  * @constructor
- * @param {Object} options Options
+ * @param
+ * @param {Object} options Options.
  * @api public
  */
-function Shrinkwrap(options) {
+function Shrinkwrap(name, options) {
+  if ('object' === typeof name) {
+    options = name;
+    name = null;
+  }
+
   options = options || {};
 
   this.registry = new Registry(options.registry);
   this.output = options.output || 'npm-shrinkwrap.json';
-  this.production = options.production || false;
+  this.production = options.production || process.NODE_ENV === 'production';
   this.limit = options.limit || 10;
   this.dependencies = [];
   this.cache = Object.create(null);
+
+  if (name) this.scan(name);
 }
 
+Shrinkwrap.prototype.__proto__ = require('eventemitter3').prototype;
+
 /**
- * Create a new shrinkwrap.
+ * Fetch the package information from a given `package.json` or from a remote
+ * module.
  *
- * @param {String} item The name of a module or a filename.
- * @param {Function} fn The callback.
- * @api public
+ * @param {String} name Either the location of the package.json or name
  */
-Shrinkwrap.prototype.create = function create(name, fn) {
+Shrinkwrap.prototype.scan = function scan(name) {
   var shrinkwrap = this;
 
+  /**
+   * We've read in the data, and are about to process it's contents and create
+   * a shrinkwrap graph.
+   *
+   * @param {Error} err Optional error argument.
+   * @param {Object} pkg The package data.
+   * @api private
+   */
   function search(err, pkg) {
-    if (err) return fn(err);
+    if (err) return shrinkwrap.emit('error', err);
 
-    shrinkwrap.add(pkg);
-    shrinkwrap.resolve(fn);
+    //
+    // Make sure they have _id property, this is something that the npm registry
+    // uses for the packages and is re-used in the shrinkwrap file. But it's not
+    // present in regular `package.json`'s
+    //
+    pkg._id = pkg._id || pkg.name +'@'+ pkg.version;
+
+    shrinkwrap.emit('read', pkg);
+    shrinkwrap.ls(pkg);
   }
 
-  if (name.charAt(0) === '/') return this.read(name, search);
-  this.module(name, search);
+  if (~name.indexOf('package.json')) {
+    this.read(name, search);
+  } else {
+    this.registry.release(name, '*', search);
+  }
+
+  return this;
 };
 
 /**
- * Resolve all the dependencies.
+ * List all dependencies for the given type.
  *
  * @api private
  */
-Shrinkwrap.prototype.resolve = function resolve(fn) {
-  var resolved = Object.create(null)
+Shrinkwrap.prototype.ls = function ls(pkg) {
+  pkg = this.dedupe(pkg);
+
+  var registry = this.registry
     , shrinkwrap = this
-    , queue;
+    , seen = {};
 
   //
-  // Process all the dependencies and create a shrinkwrap graph.
+  // The initial data structure of a shrinkwrapped module.
   //
-  queue = async.queue(function worker(data, next) {
-    resolved[data.key] = true;
+  var data = {
+    name: pkg.name,
+    version: pkg.version
+  };
 
-    shrinkwrap.module(data.name, data.version, function find(err, pkg) {
+  var queue = async.queue(function worker(data, next) {
+    var from = data.name +'@'+ data.range;
+
+    if (from in seen) {
+      data.ref[data.name] = seen[from];
+      return next();
+    }
+
+    console.log('dependencies', data);
+
+    registry.release(data.name, data.range, function (err, pkg) {
       if (err) return next(err);
 
-      var wrap = { name: pkg.name , version: pkg.version , shasum: pkg.dist.shasum }
-        , dependencies = shrinkwrap.extract(pkg);
+      seen[from] = {
+        version: pkg.version,
+        shasum: pkg.shasum,
+        license: pkg.license,
+        released: pkg.date,
+        from: from
+      };
 
-      if (dependencies.length) {
-        wrap.dependencies = [];
-        dependencies.forEach(function each(data) {
-          wrap.dependencies.push(data.key);
+      data.ref[data.name] = seen[from];
 
-          if (data.key in resolved) return;
-          queue.push(data);
+      pkg = shrinkwrap.dedupe(pkg);
+      if (pkg.dependencies) Object.keys(pkg.dependencies).forEach(function (key) {
+        queue.push({
+          name: key,
+          range: pkg.dependencies[key],
+          ref: seen[from].dependencies || (seen[from].dependencies = {})
         });
-      }
+      });
 
       next();
     });
   }, this.limit);
 
-  queue.ondrain = function drained() {
-    fn();
+  queue.drain = function ondrain() {
+    shrinkwrap.emit('ls', data);
   };
 
-  //
-  // Start processing all the dependencies.
-  //
-  this.dependencies.forEach(function each(data) {
-    queue.push(data);
+  Object.keys(pkg.dependencies).forEach(function (key) {
+    queue.push({
+      name: key,
+      range: pkg.dependencies[key],
+      ref: data.dependencies || (data.dependencies = {})
+    });
   });
+};
+
+/**
+ * It could be that a package has dependency added as devDependency as well as
+ * a regular dependency. We want to make sure that we dont' filter out this
+ * dependency when we're resolving packages so we're going to remove it from the
+ * devDependencies if they are exactly the same.
+ *
+ * @param {Object} pkg The package.
+ * @returns {Object} The package.
+ * @api private
+ */
+Shrinkwrap.prototype.dedupe = function dedupe(pkg) {
+  if (!pkg.dependencies) return pkg;
+  if (!pkg.devDependencies) return pkg;
+
+  Object.keys(pkg.dependencies).forEach(function searchanddestroy(name) {
+    if (!(name in pkg.devDependencies)) return;
+    if (!semver.eq(pkg.devDependencies[name], pkg.dependencies[name])) return;
+
+    //
+    // Only remove when we have an exact match on the version number.
+    //
+    delete pkg.devDependencies[name];
+  });
+
+  return pkg;
 };
 
 /**
@@ -100,61 +185,26 @@ Shrinkwrap.prototype.resolve = function resolve(fn) {
  * @api private
  */
 Shrinkwrap.prototype.read = function read(file, fn) {
-  var data;
+  fs.readFile(file, 'utf-8', function reads(err, content) {
+    if (err) return fn(err);
 
-  try { data = require(file); }
-  catch (e) {
-    if (fn) return fn(e);
-    throw e;
-  }
+    var data;
 
-  if (fn) return fn(undefined, data);
-  return data;
-};
-
-/**
- * Add new dependencies to the shrinkwrap.
- *
- * @param {Object} data The package.json source
- * @api private
- */
-Shrinkwrap.prototype.add = function add(data) {
-  var dependencies = this.extract(data);
-
-  if (dependencies.length) {
-    Array.prototype.push.apply(this.dependencies, dependencies);
-  }
-};
-
-Shrinkwrap.prototype.extract = function extract(data) {
-  var dependencies = [];
-
-  ['dependencies', 'devDependencies'].forEach(function scan(key) {
-    var definition = data[key];
-
-    if ('object' !== typeof definition || Array.isArray(definition)) return;
-    if (this.production && key === 'devDependencies') return;
-
-    for (var name in definition) {
-      var version = definition[name];
-
-      if (!definition.hasOwnProperty(name)) continue;
-      if ('object' === typeof version) continue;
-
-      dependencies.push({
-          development: key === 'devDependencies'
-        , version: new Version(version)
-        , key: name +'@'+ version
-        , name: name
-      });
+    try { data = JSON.parse(content); }
+    catch (e) {
+      return fn(new Error(file +' contains invalid JSON: '+ e.message));
     }
-  }, this);
 
-  return dependencies;
+    fn(undefined, data);
+  });
+
+  return this;
 };
 
 //
 // Expose the module interface.
 //
 Shrinkwrap.Version = Version;
+Shrinkwrap.Registry = Registry;
+
 module.exports = Shrinkwrap;

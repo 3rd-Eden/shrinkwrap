@@ -63,6 +63,7 @@ Registry.prototype.releases = function releases(name, fn) {
   }).map(function map(release) {
     return {
         tag: release.tag || ''
+      , name: release.name || ''
       , date: release.date || '1970-01-01T00:00:00.000Z'
       , version: release.version || '0.0.0'
       , license: release.license || 'Proprietary'
