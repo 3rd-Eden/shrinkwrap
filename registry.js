@@ -1,6 +1,7 @@
 'use strict';
 
-var Assignment = require('assign')
+var license = require('./license.js')
+  , Assignment = require('assign')
   , request = require('request')
   , semver = require('./semver')
   , url = require('url');
@@ -66,7 +67,7 @@ Registry.prototype.releases = function releases(name, fn) {
       , name: release.name || ''
       , date: release.date || '1970-01-01T00:00:00.000Z'
       , version: release.version || '0.0.0'
-      , license: release.license || 'Proprietary'
+      , license: license(release)
       , shasum: release.dist.shasum || ''
       , dependencies: release.dependencies || {}
       , devDependencies: release.devDependencies || {}

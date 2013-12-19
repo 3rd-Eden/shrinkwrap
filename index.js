@@ -109,8 +109,6 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
       return next();
     }
 
-    console.log('dependencies', data);
-
     registry.release(data.name, data.range, function (err, pkg) {
       if (err) return next(err);
 
@@ -200,6 +198,13 @@ Shrinkwrap.prototype.read = function read(file, fn) {
 
   return this;
 };
+
+Shrinkwrap.dependencies = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies'
+];
 
 //
 // Expose the module interface.
