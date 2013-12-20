@@ -91,7 +91,7 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
 
   var registry = this.registry
     , shrinkwrap = this
-    , seen = {};
+    , dependency = {};
 
   //
   // The initial data structure of a shrinkwrapped module.
@@ -101,51 +101,130 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
     version: pkg.version
   };
 
-  var queue = async.queue(function worker(data, next) {
-    var from = data.name +'@'+ data.range;
+  /**
+   * Push new items in to the queue.
+   *
+   * @param {Object} pkg The package we need to scan.
+   * @param {Object} ref The location of new packages.
+   * @param {Object} depended Reference to the module
+   */
+  function push(pkg, parent) {
+    if (pkg.dependencies) Object.keys(pkg.dependencies).forEach(function (key) {
+      parent.dependencies = parent.dependencies || {};
 
-    if (from in seen) {
-      data.ref[data.name] = seen[from];
+      queue.push({
+        name: key,
+        parent: parent,
+        range: pkg.dependencies[key]
+      });
+    });
+  }
+
+  var queue = async.queue(function worker(data, next) {
+    var _id = data.name +'@'+ data.range;
+
+    //
+    // @TODO check if we need to move the module upwards to this dependency can
+    // be loaded from a parent folder.
+    //
+    if (_id in dependency) {
+      dependency[_id].dependet.push(data.parent);   // Add it to depended modules.
+      shrinkwrap.optimize(dependency[_id]);         // Optimize module's location.
       return next();
     }
 
-    registry.release(data.name, data.range, function (err, pkg) {
+    registry.release(data.name, data.range, function found(err, pkg) {
       if (err) return next(err);
 
-      seen[from] = {
-        version: pkg.version,
-        shasum: pkg.shasum,
-        license: pkg.license,
-        released: pkg.date,
-        from: from
+      dependency[_id] = {
+        dependent: [data.parent], // The modules that depend on this version.
+        license: pkg.license,     // The module's license.
+        version: pkg.version,     // Version number.
+        parent: data.parent,      // The parent which hold this a dependency.
+        shasum: pkg.shasum,       // SHASUM of the package contents.
+        released: pkg.date,       // Publish date of the version.
+        name: pkg.name,           // Module name, to prevent duplicate.
+        _id: _id                  // _id of the package.
       };
 
-      data.ref[data.name] = seen[from];
-
-      pkg = shrinkwrap.dedupe(pkg);
-      if (pkg.dependencies) Object.keys(pkg.dependencies).forEach(function (key) {
-        queue.push({
-          name: key,
-          range: pkg.dependencies[key],
-          ref: seen[from].dependencies || (seen[from].dependencies = {})
-        });
-      });
+      //
+      // Add it as dependency and add possible dependency to the queue so it can
+      // be resolved.
+      //
+      data.parent.dependency[data.name] = dependency[_id];
+      push(shrinkwrap.dedupe(pkg), dependency[_id]);
 
       next();
     });
   }, this.limit);
 
   queue.drain = function ondrain() {
-    shrinkwrap.emit('ls', data);
+    shrinkwrap.emit('ls', data, dependency);
   };
 
-  Object.keys(pkg.dependencies).forEach(function (key) {
-    queue.push({
-      name: key,
-      range: pkg.dependencies[key],
-      ref: data.dependencies || (data.dependencies = {})
+  if (pkg.dependencies && Object.keys(pkg.dependencies).length) {
+    push(pkg);
+  } else {
+    this.emit('ls', data, {});
+  }
+
+  return this;
+};
+
+/**
+ * Optimize the dependency tree so we're not installing duplicate dependencies
+ * in every module when they can be properly resolved by placing it upwards in
+ * our dependency tree.
+ *
+ * @param {Object} dependency The dependency that has multiple dependends.
+ * @api private
+ */
+Shrinkwrap.prototype.optimize = function optimize(dependency) {
+  var dependend = dependency.depended
+    , version = dependency.version
+    , name = dependency.name;
+
+  /**
+   * Find suitable parent nodes which can hold this module without creating
+   * a possible conflict because there two different versions of the module in
+   * the dependency tree.
+   *
+   * @param {Object} dependent A dependent of a module.
+   * @returns {Array} parents.
+   * @api private
+   */
+  function parent(dependent) {
+    var node = dependent
+      , result = [];
+
+    while (node.parent) {
+      if (!available(parent.parent)) break;
+
+      result.push(parent.parent);
+      node = parent.parent;
+    }
+
+    return result;
+  }
+
+  /**
+   * Checks if the dependency tree does not already contain a different version
+   * of this module.
+   *
+   * @param {Object} dependencies The dependencies of a module.
+   * @returns {Boolean} Available as module location.
+   * @api private
+   */
+  function available(dependencies) {
+    return Object.keys(dependencies).every(function every(key) {
+      var dependency = dependencies[key];
+
+      if (dependency.name !== name) return true;
+      if (dependency.version === version) return true;
+
+      return false;
     });
-  });
+  }
 };
 
 /**
