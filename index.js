@@ -17,7 +17,7 @@ var Registry = require('./registry')
  * - limit: Amount of parallel processing tasks we could use to retrieve data.
  *
  * @constructor
- * @param
+ * @param {String} name The package we should inspect.
  * @param {Object} options Options.
  * @api public
  */
@@ -29,10 +29,27 @@ function Shrinkwrap(name, options) {
 
   options = options || {};
 
+  options.registry = 'registry' in options
+    ? options.registry
+    : 'https://registry.npmjs.org/';
+
+  options.production = 'production' in options
+    ? options.production
+    : process.NODE_ENV === 'production';
+
+  options.optimize = 'optimize' in options
+    ? options.optimize
+    : true;
+
+  options.limit = 'limit' in options
+    ? options.limit
+    : 10;
+
+  name = name || options.name;
+
   this.registry = new Registry(options.registry);
-  this.output = options.output || 'npm-shrinkwrap.json';
-  this.production = options.production || process.NODE_ENV === 'production';
-  this.limit = options.limit || 10;
+  this.production = options.production;
+  this.limit = options.limit;
   this.dependencies = [];
   this.cache = Object.create(null);
 
@@ -46,6 +63,7 @@ Shrinkwrap.prototype.__proto__ = require('eventemitter3').prototype;
  * module.
  *
  * @param {String} name Either the location of the package.json or name
+ * @api private
  */
 Shrinkwrap.prototype.scan = function scan(name) {
   var shrinkwrap = this;
@@ -105,8 +123,7 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
    * Push new items in to the queue.
    *
    * @param {Object} pkg The package we need to scan.
-   * @param {Object} ref The location of new packages.
-   * @param {Object} depended Reference to the module
+   * @param {Object} parent The location of new packages.
    */
   function push(pkg, parent) {
     if (pkg.dependencies) Object.keys(pkg.dependencies).forEach(function (key) {
@@ -128,7 +145,7 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
     // be loaded from a parent folder.
     //
     if (_id in dependency) {
-      dependency[_id].dependet.push(data.parent);   // Add it to depended modules.
+      dependency[_id].dependent.push(data.parent);  // Add it to depended modules.
       shrinkwrap.optimize(dependency[_id]);         // Optimize module's location.
       return next();
     }
@@ -137,21 +154,21 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
       if (err) return next(err);
 
       dependency[_id] = {
-        dependent: [data.parent], // The modules that depend on this version.
-        license: pkg.license,     // The module's license.
-        version: pkg.version,     // Version number.
-        parent: data.parent,      // The parent which hold this a dependency.
-        shasum: pkg.shasum,       // SHASUM of the package contents.
-        released: pkg.date,       // Publish date of the version.
-        name: pkg.name,           // Module name, to prevent duplicate.
-        _id: _id                  // _id of the package.
+        dependent: [data.parent],   // The modules that depend on this version.
+        license: pkg.license,       // The module's license.
+        version: pkg.version,       // Version number.
+        parent: data.parent,        // The parent which hold this a dependency.
+        shasum: pkg.shasum,         // SHASUM of the package contents.
+        released: pkg.date,         // Publish date of the version.
+        name: pkg.name,             // Module name, to prevent duplicate.
+        _id: _id                    // _id of the package.
       };
 
       //
       // Add it as dependency and add possible dependency to the queue so it can
       // be resolved.
       //
-      data.parent.dependency[data.name] = dependency[_id];
+      data.parent.dependencies[data.name] = dependency[_id];
       push(shrinkwrap.dedupe(pkg), dependency[_id]);
 
       next();
@@ -163,7 +180,7 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
   };
 
   if (pkg.dependencies && Object.keys(pkg.dependencies).length) {
-    push(pkg);
+    push(pkg, data);
   } else {
     this.emit('ls', data, {});
   }
@@ -180,9 +197,10 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
  * @api private
  */
 Shrinkwrap.prototype.optimize = function optimize(dependency) {
-  var dependend = dependency.depended
+  var dependent = dependency.dependent
     , version = dependency.version
-    , name = dependency.name;
+    , name = dependency.name
+    , common;
 
   /**
    * Find suitable parent nodes which can hold this module without creating
@@ -198,10 +216,10 @@ Shrinkwrap.prototype.optimize = function optimize(dependency) {
       , result = [];
 
     while (node.parent) {
-      if (!available(parent.parent)) break;
+      if (!available(node.parent)) break;
 
-      result.push(parent.parent);
-      node = parent.parent;
+      result.push(node.parent);
+      node = node.parent;
     }
 
     return result;
@@ -216,6 +234,8 @@ Shrinkwrap.prototype.optimize = function optimize(dependency) {
    * @api private
    */
   function available(dependencies) {
+    if (!dependencies) return false;
+
     return Object.keys(dependencies).every(function every(key) {
       var dependency = dependencies[key];
 
@@ -225,6 +245,29 @@ Shrinkwrap.prototype.optimize = function optimize(dependency) {
       return false;
     });
   }
+
+  var parents = dependent.map(function (dep) {
+    var parents = parent(dep);
+
+    //
+    // No parents, this means we cannot move this module to a new location as it
+    // will most likely conflict with other version. The only solution is to
+    // keep it as duplicate as it's own dependencies. The way to do this is to
+    // remove out of
+    //
+    if (!parents.length) {
+      dependency.dependent.splice(dependency.dependent.indexOf(dep), 1);
+    }
+
+    return parents;
+  }).filter(function filter(results) {
+    return !!results.length;
+  });
+
+  //
+  // Detect if all parents have a common root element where we can optimize the
+  // module to.
+  //
 };
 
 /**
