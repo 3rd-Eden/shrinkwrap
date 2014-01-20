@@ -286,7 +286,9 @@ Shrinkwrap.prototype.dedupe = function dedupe(pkg) {
 
   Object.keys(pkg.dependencies).forEach(function searchanddestroy(name) {
     if (!(name in pkg.devDependencies)) return;
-    if (!semver.eq(pkg.devDependencies[name], pkg.dependencies[name])) return;
+    try {
+      if (!semver.eq(pkg.devDependencies[name], pkg.dependencies[name])) return;
+    } catch (e) { return; }
 
     //
     // Only remove when we have an exact match on the version number.
