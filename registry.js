@@ -10,14 +10,13 @@ var license = require('./license.js')
  * A simple npm registry interface for data retrieval.
  *
  * @constructor
- * @param {Object} options Configure the Registry client.
+ * @param {String} URL The URL of the npm registry.
  * @api public
  */
-function Registry(options) {
-  if (!(this instanceof Registry)) return new Registry(options);
+function Registry(URL) {
+  if (!(this instanceof Registry)) return new Registry(URL);
 
-  options = options || {};
-  this.registry = options.registry || 'https://registry.npmjs.org/';
+  this.registry = URL || 'https://registry.npmjs.org/';
 }
 
 /**
@@ -105,6 +104,8 @@ Registry.prototype.release = function release(name, range, fn) {
  * @api private
  */
 Registry.prototype.get = function get(pathname, fn) {
+  var assignee = new Assignment(this, fn);
+
   request({
     method: 'GET',
     strictSSL: false,
@@ -129,7 +130,6 @@ Registry.prototype.get = function get(pathname, fn) {
     assignee.write(data, true);
   });
 
-  var assignee = new Assignment(this, fn);
   return assignee;
 };
 
