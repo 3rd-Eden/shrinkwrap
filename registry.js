@@ -1,6 +1,7 @@
 'use strict';
 
-var license = require('./license.js')
+var debug = require('debug')('shrinkwrap::registry')
+  , licenses = require('licenses')
   , Assignment = require('assign')
   , request = require('request')
   , semver = require('./semver')
@@ -66,7 +67,7 @@ Registry.prototype.releases = function releases(name, fn) {
       , name: release.name || ''
       , date: release.date || '1970-01-01T00:00:00.000Z'
       , version: release.version || '0.0.0'
-      , license: license(release)
+      , license: licenses(release)
       , shasum: release.dist.shasum || ''
       , dependencies: release.dependencies || {}
       , devDependencies: release.devDependencies || {}
@@ -89,9 +90,15 @@ Registry.prototype.releases = function releases(name, fn) {
 Registry.prototype.release = function release(name, range, fn) {
   return this.releases(name, function releases(err, versions) {
     if (err) return fn(err);
-    if (range in versions) return fn(undefined, versions[range]);
+
+    if (range in versions) {
+      debug('found and direct range (%s) match for %s', range, name);
+      return fn(undefined, versions[range]);
+    }
 
     var version = semver.maxSatisfying(Object.keys(versions), range);
+
+    debug('max satisfying version for %s is %s', name, version);
     fn(undefined, versions[version]);
   });
 };
@@ -104,23 +111,29 @@ Registry.prototype.release = function release(name, range, fn) {
  * @api private
  */
 Registry.prototype.get = function get(pathname, fn) {
-  var assignee = new Assignment(this, fn);
+  var location = url.resolve(this.registry, pathname)
+    , assignee = new Assignment(this, fn);
+
+  debug('getting url: %s', location);
 
   request({
     method: 'GET',
     strictSSL: false,
-    uri: url.resolve(this.registry, pathname)
+    uri: location
   }, function received(err, res, body) {
     if (err) return assignee.destroy(err);
     if (res.statusCode !== 200) {
-      err = new Error('Received an invalid statusCode, expected statusCode 200');
+      err = new Error('Received an invalid statusCode ('+ res.statusCode +'), expected statusCode 200');
       err.statusCode = res.statusCode;
 
       return assignee.destroy(err);
     }
 
+    //
+    // In this case I prefer to manually parse the JSON response as it allows us
+    // to return more readable error messages.
+    //
     var data;
-
     try { data = JSON.parse(body); }
     catch (e) {
       assignee.destroy(new Error('Failed to parse the JSON response: '+ e.message));

@@ -1,6 +1,7 @@
 'use strict';
 
-var Registry = require('./registry')
+var debug = require('debug')('shrinkwrap')
+  , Registry = require('./registry')
   , Version = require('./version')
   , semver = require('./semver')
   , async = require('async')

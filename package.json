@@ -20,10 +20,12 @@
     "url": "https://github.com/3rd-Eden/shrinkwrap/issues"
   },
   "dependencies": {
-    "semver": "~2.1.0",
-    "request": "~2.27.0",
-    "async": "~0.2.9",
-    "assign": "~0.0.1",
-    "eventemitter3": "~0.1.1"
+    "assign": "0.0.x",
+    "async": "0.2.x",
+    "eventemitter3": "0.1.x",
+    "licenses": "0.0.x",
+    "request": "2.27.x",
+    "semver": "2.1.x",
+    "debug": "~0.7.4"
   }
 }
