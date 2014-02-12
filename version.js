@@ -1,6 +1,6 @@
 'use strict';
 
-var semver = require('./semver');
+var semver = require('npmjs/semver');
 
 /**
  * A simple representation of a module's version number.

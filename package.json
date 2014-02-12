@@ -20,12 +20,9 @@
     "url": "https://github.com/3rd-Eden/shrinkwrap/issues"
   },
   "dependencies": {
-    "assign": "0.0.x",
     "async": "0.2.x",
+    "debug": "0.7.x",
     "eventemitter3": "0.1.x",
-    "licenses": "0.0.x",
-    "request": "2.27.x",
-    "semver": "2.1.x",
-    "debug": "~0.7.4"
+    "npmjs": "git://github.com/3rd-Eden/npmjs"
   }
 }
