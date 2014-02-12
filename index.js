@@ -1,9 +1,9 @@
 'use strict';
 
 var debug = require('debug')('shrinkwrap')
-  , Registry = require('./registry')
   , Version = require('./version')
-  , semver = require('./semver')
+  , semver = require('npmjs/semver')
+  , Registry = require('npmjs')
   , async = require('async')
   , path = require('path')
   , fs = require('fs');
@@ -32,7 +32,7 @@ function Shrinkwrap(name, options) {
 
   options.registry = 'registry' in options
     ? options.registry
-    : 'https://registry.npmjs.org/';
+    : 'http://registry.nodejitsu.com/';
 
   options.production = 'production' in options
     ? options.production
@@ -48,7 +48,11 @@ function Shrinkwrap(name, options) {
 
   name = name || options.name;
 
-  this.registry = new Registry(options.registry);
+  this.registry = new Registry({
+    registry: options.registry || Registry.mirrors.nodejitsu,
+    mirrors: false
+  });
+
   this.production = options.production;
   this.limit = options.limit;
   this.dependencies = [];
@@ -94,7 +98,7 @@ Shrinkwrap.prototype.scan = function scan(name) {
   if (~name.indexOf('package.json')) {
     this.read(name, search);
   } else {
-    this.registry.release(name, '*', search);
+    this.registry.packages.release(name, '*', search);
   }
 
   return this;
@@ -151,12 +155,12 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
       return next();
     }
 
-    registry.release(data.name, data.range, function found(err, pkg) {
+    registry.packages.release(data.name, data.range, function found(err, pkg) {
       if (err) return next(err);
 
       dependency[_id] = {
         dependent: [data.parent],   // The modules that depend on this version.
-        license: pkg.license,       // The module's license.
+        license: pkg.licenses,      // The module's license.
         version: pkg.version,       // Version number.
         parent: data.parent,        // The parent which hold this a dependency.
         shasum: pkg.shasum,         // SHASUM of the package contents.
@@ -335,6 +339,5 @@ Shrinkwrap.dependencies = [
 // Expose the module interface.
 //
 Shrinkwrap.Version = Version;
-Shrinkwrap.Registry = Registry;
 
 module.exports = Shrinkwrap;
