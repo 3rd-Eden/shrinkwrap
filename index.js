@@ -16,16 +16,10 @@ var debug = require('debug')('shrinkwrap')
  * - limit: Amount of parallel processing tasks we could use to retrieve data.
  *
  * @constructor
- * @param {String} name The package we should inspect.
  * @param {Object} options Options.
  * @api public
  */
-function Shrinkwrap(name, options) {
-  if ('object' === typeof name) {
-    options = name;
-    name = null;
-  }
-
+function Shrinkwrap(options) {
   options = options || {};
 
   options.registry = 'registry' in options
@@ -44,7 +38,9 @@ function Shrinkwrap(name, options) {
     ? options.limit
     : 10;
 
-  name = name || options.name;
+  options.mirrors = 'mirrors' in options
+    ? options.mirrors
+    : false;
 
   this.registry = new Registry({
     registry: options.registry || Registry.mirrors.nodejitsu,
@@ -60,6 +56,30 @@ function Shrinkwrap(name, options) {
 fuse(Shrinkwrap, require('eventemitter3'));
 
 /**
+ * No previous package, resolve one for us instead.
+ *
+ * @param {String} name Package name.
+ * @param {String} range Version range.
+ * @param {Function} fn The completion callback.
+ * @api public
+ */
+Shrinkwrap.prototype.get = function get(name, range, fn) {
+  if ('function' === typeof range) {
+    fn = range;
+    range = '*';
+  }
+
+  var shrinkwrap = this;
+
+  this.registry.packages.release(name, range, function release(err, pkg) {
+    if (err) return fn(err);
+
+    debug('successfully resolved %s@%s', name, range);
+    shrinkwrap.resolve(pkg, fn);
+  });
+};
+
+/**
  * Resolve all dependencies and their versions for the given root package.
  *
  * @param {Object} pkg  Package data from npm.
@@ -67,7 +87,7 @@ fuse(Shrinkwrap, require('eventemitter3'));
  * @api public
  */
 Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, fn) {
-  pkg = this.dedupe(pkg);
+  pkg = this.dedupe(Array.isArray(pkg) ? pkg.pop() : pkg);
 
   var registry = this.registry
     , shrinkwrap = this
@@ -113,6 +133,7 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
       return next();
     }
 
+    debug('retreiving dependency %s@%s', data.name, data.range);
     registry.packages.release(data.name, data.range, function found(err, pkg) {
       if (err) return next(err);
 
@@ -137,6 +158,9 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
     });
   }, this.limit);
 
+  //
+  // Fully flushed
+  //
   queue.drain = function ondrain() {
     fn(undefined, data, dependency);
   };
@@ -203,6 +227,8 @@ Shrinkwrap.prototype.optimize = function optimize(dependency) {
 
     return Object.keys(dependencies).every(function every(key) {
       var dependency = dependencies[key];
+
+      if (!dependency) return false;
 
       if (dependency.name !== name) return true;
       if (dependency.version === version) return true;
