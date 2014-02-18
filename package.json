@@ -1,6 +1,6 @@
 {
   "name": "shrinkwrap",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "npm shrinkwrap parser, generation and comparison",
   "main": "index.js",
   "scripts": {
