@@ -44,7 +44,7 @@ function Shrinkwrap(options) {
 
   this.registry = new Registry({
     registry: options.registry || Registry.mirrors.nodejitsu,
-    mirrors: false
+    mirrors: options.mirrors
   });
 
   this.production = options.production;     // Don't include devDependencies.
