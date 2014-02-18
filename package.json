@@ -23,6 +23,7 @@
     "async": "0.2.x",
     "debug": "0.7.x",
     "eventemitter3": "0.1.x",
-    "npmjs": "git://github.com/3rd-Eden/npmjs"
+    "npmjs": "git://github.com/3rd-Eden/npmjs",
+    "fusing": "0.0.2"
   }
 }

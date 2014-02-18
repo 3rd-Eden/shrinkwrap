@@ -1,12 +1,10 @@
 'use strict';
 
 var debug = require('debug')('shrinkwrap')
-  , Version = require('./version')
   , semver = require('npmjs/semver')
   , Registry = require('npmjs')
-  , async = require('async')
-  , path = require('path')
-  , fs = require('fs');
+  , fuse = require('fusing')
+  , async = require('async');
 
 /**
  * Generate a new shrinkwrap from a given package or module.
@@ -53,63 +51,22 @@ function Shrinkwrap(name, options) {
     mirrors: false
   });
 
-  this.production = options.production;
-  this.limit = options.limit;
-  this.dependencies = [];
-  this.cache = Object.create(null);
-
-  if (name) this.scan(name);
+  this.production = options.production;     // Don't include devDependencies.
+  this.limit = options.limit;               // Maximum concurrency.
+  this.dependencies = [];                   // The dependencies.
+  this.cache = Object.create(null);         // Dependency cache.
 }
 
-Shrinkwrap.prototype.__proto__ = require('eventemitter3').prototype;
+fuse(Shrinkwrap, require('eventemitter3'));
 
 /**
- * Fetch the package information from a given `package.json` or from a remote
- * module.
+ * Resolve all dependencies and their versions for the given root package.
  *
- * @param {String} name Either the location of the package.json or name
- * @api private
+ * @param {Object} pkg  Package data from npm.
+ * @param {Function} fn Callback
+ * @api public
  */
-Shrinkwrap.prototype.scan = function scan(name) {
-  var shrinkwrap = this;
-
-  /**
-   * We've read in the data, and are about to process it's contents and create
-   * a shrinkwrap graph.
-   *
-   * @param {Error} err Optional error argument.
-   * @param {Object} pkg The package data.
-   * @api private
-   */
-  function search(err, pkg) {
-    if (err) return shrinkwrap.emit('error', err);
-
-    //
-    // Make sure they have _id property, this is something that the npm registry
-    // uses for the packages and is re-used in the shrinkwrap file. But it's not
-    // present in regular `package.json`'s
-    //
-    pkg._id = pkg._id || pkg.name +'@'+ pkg.version;
-
-    shrinkwrap.emit('read', pkg);
-    shrinkwrap.ls(pkg);
-  }
-
-  if (~name.indexOf('package.json')) {
-    this.read(name, search);
-  } else {
-    this.registry.packages.release(name, '*', search);
-  }
-
-  return this;
-};
-
-/**
- * List all dependencies for the given type.
- *
- * @api private
- */
-Shrinkwrap.prototype.ls = function ls(pkg) {
+Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, fn) {
   pkg = this.dedupe(pkg);
 
   var registry = this.registry
@@ -129,6 +86,7 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
    *
    * @param {Object} pkg The package we need to scan.
    * @param {Object} parent The location of new packages.
+   * @api private
    */
   function push(pkg, parent) {
     if (pkg.dependencies) Object.keys(pkg.dependencies).forEach(function (key) {
@@ -159,14 +117,13 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
       if (err) return next(err);
 
       dependency[_id] = {
-        dependent: [data.parent],   // The modules that depend on this version.
-        license: pkg.licenses,      // The module's license.
-        version: pkg.version,       // Version number.
-        parent: data.parent,        // The parent which hold this a dependency.
-        shasum: pkg.shasum,         // SHASUM of the package contents.
-        released: pkg.date,         // Publish date of the version.
-        name: pkg.name,             // Module name, to prevent duplicate.
-        _id: _id                    // _id of the package.
+        dependent: [data.parent],             // The modules that depend on this version.
+        license: pkg.licenses || pkg.license, // The module's license.
+        version: pkg.version,                 // Version number.
+        parent: data.parent,                  // The parent which hold this a dependency.
+        released: pkg.date,                   // Publish date of the version.
+        name: pkg.name,                       // Module name, to prevent duplicate.
+        _id: _id                              // _id of the package.
       };
 
       //
@@ -181,13 +138,16 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
   }, this.limit);
 
   queue.drain = function ondrain() {
-    shrinkwrap.emit('ls', data, dependency);
+    fn(undefined, data, dependency);
   };
 
+  //
+  // Add new dependencies that should be resolved.
+  //
   if (pkg.dependencies && Object.keys(pkg.dependencies).length) {
     push(pkg, data);
   } else {
-    this.emit('ls', data, {});
+    fn(undefined, data, {});
   }
 
   return this;
@@ -198,7 +158,7 @@ Shrinkwrap.prototype.ls = function ls(pkg) {
  * in every module when they can be properly resolved by placing it upwards in
  * our dependency tree.
  *
- * @param {Object} dependency The dependency that has multiple dependends.
+ * @param {Object} dependency The dependency that has multiple dependents.
  * @api private
  */
 Shrinkwrap.prototype.optimize = function optimize(dependency) {
@@ -277,7 +237,7 @@ Shrinkwrap.prototype.optimize = function optimize(dependency) {
 
 /**
  * It could be that a package has dependency added as devDependency as well as
- * a regular dependency. We want to make sure that we dont' filter out this
+ * a regular dependency. We want to make sure that we don't filter out this
  * dependency when we're resolving packages so we're going to remove it from the
  * devDependencies if they are exactly the same.
  *
@@ -305,29 +265,12 @@ Shrinkwrap.prototype.dedupe = function dedupe(pkg) {
 };
 
 /**
- * Read a file so it can be parsed as dependency list.
+ * The various of locations where dependencies for a given module can be
+ * defined.
  *
- * @param {String} file The location of the file that we need to parse.
- * @param {Function} fn Optional callback for error handling.
- * @api private
+ * @type {Array}
+ * @private
  */
-Shrinkwrap.prototype.read = function read(file, fn) {
-  fs.readFile(file, 'utf-8', function reads(err, content) {
-    if (err) return fn(err);
-
-    var data;
-
-    try { data = JSON.parse(content); }
-    catch (e) {
-      return fn(new Error(file +' contains invalid JSON: '+ e.message));
-    }
-
-    fn(undefined, data);
-  });
-
-  return this;
-};
-
 Shrinkwrap.dependencies = [
   'dependencies',
   'devDependencies',
@@ -338,6 +281,4 @@ Shrinkwrap.dependencies = [
 //
 // Expose the module interface.
 //
-Shrinkwrap.Version = Version;
-
 module.exports = Shrinkwrap;
