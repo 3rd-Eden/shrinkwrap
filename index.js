@@ -140,7 +140,7 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
 
       dependency[_id] = {
         dependent: [data.parent],             // The modules that depend on this version.
-        license: pkg.licenses || pkg.license, // The module's license.
+        license: pkg.licenses,                // The module's license.
         version: pkg.version,                 // Version number.
         parent: data.parent,                  // The parent which hold this a dependency.
         released: pkg.date,                   // Publish date of the version.
