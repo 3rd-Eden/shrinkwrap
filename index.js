@@ -44,6 +44,7 @@ function Shrinkwrap(options) {
 
   this.registry = new Registry({
     registry: options.registry || Registry.mirrors.nodejitsu,
+    githulk: options.githulk,
     mirrors: options.mirrors
   });
 
@@ -74,7 +75,7 @@ Shrinkwrap.prototype.get = function get(name, range, fn) {
   this.registry.packages.release(name, range, function release(err, pkg) {
     if (err) return fn(err);
 
-    debug('successfully resolved %s@%s', name, range);
+    debug('successfully resolved %s@%s', name, range, pkg);
     shrinkwrap.resolve(pkg, fn);
   });
 };
@@ -272,6 +273,7 @@ Shrinkwrap.prototype.optimize = function optimize(dependency) {
  * @api private
  */
 Shrinkwrap.prototype.dedupe = function dedupe(pkg) {
+  if (!pkg) return pkg;
   if (!pkg.dependencies) return pkg;
   if (!pkg.devDependencies) return pkg;
 
