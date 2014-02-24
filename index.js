@@ -14,6 +14,10 @@ var debug = require('debug')('shrinkwrap')
  * - registry: URL of the npm registry we should use to read package information.
  * - production: Should we only include production packages.
  * - limit: Amount of parallel processing tasks we could use to retrieve data.
+ * - optimize: Should we attempt to optimize the data structure in the same way
+ *   that npm would have done it.
+ * - mirrors: A list of npm mirrors to be used with our registry.
+ * - githulk: Optional preconfigured githulk.
  *
  * @constructor
  * @param {Object} options Options.
@@ -50,7 +54,6 @@ function Shrinkwrap(options) {
 
   this.production = options.production;     // Don't include devDependencies.
   this.limit = options.limit;               // Maximum concurrency.
-  this.dependencies = [];                   // The dependencies.
   this.cache = Object.create(null);         // Dependency cache.
 }
 
@@ -75,7 +78,7 @@ Shrinkwrap.prototype.get = function get(name, range, fn) {
   this.registry.packages.release(name, range, function release(err, pkg) {
     if (err) return fn(err);
 
-    debug('successfully resolved %s@%s', name, range, pkg);
+    debug('successfully resolved %s@%s', name, range);
     shrinkwrap.resolve(pkg, fn);
   });
 };
@@ -110,7 +113,7 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
    * @api private
    */
   function push(pkg, parent) {
-    if (pkg.dependencies) Object.keys(pkg.dependencies).forEach(function (key) {
+    if (pkg.dependencies) Object.keys(pkg.dependencies).forEach(function eachpkg(key) {
       parent.dependencies = parent.dependencies || {};
 
       queue.push({
@@ -131,12 +134,22 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
     if (_id in dependency) {
       dependency[_id].dependent.push(data.parent);  // Add it to depended modules.
       shrinkwrap.optimize(dependency[_id]);         // Optimize module's location.
+
       return next();
     }
 
     debug('retreiving dependency %s@%s', data.name, data.range);
-    registry.packages.release(data.name, data.range, function found(err, pkg) {
+    shrinkwrap.releases(data.name, function found(err, packages) {
       if (err) return next(err);
+
+      var version = semver.maxSatisfying(Object.keys(packages), data.range)
+        , pkg = packages[version];
+
+      //
+      // No matching version for the given module. It could be that the user has
+      // set the range to git dependency instead.
+      //
+      if (!pkg) return next();
 
       dependency[_id] = {
         dependent: [data.parent],             // The modules that depend on this version.
@@ -173,10 +186,31 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
   if (pkg.dependencies && Object.keys(pkg.dependencies).length) {
     push(pkg, data);
   } else {
+    debug('package %s had no dependencies, nothing to shrinkwrap', pkg.name);
     fn(undefined, data, {});
   }
 
   return this;
+};
+
+/**
+ * Get all releases for a given module name.
+ *
+ * @param {String} name The name of the module we should get
+ * @param {Function} fn Callback
+ * @api private
+ */
+Shrinkwrap.prototype.releases = function releases(name, fn) {
+  if (this.cache && name in this.cache) return fn(undefined, this.cache[name]);
+
+  var shrinkwrap = this;
+
+  this.registry.packages.releases(name, function details(err, data) {
+    if (err) return fn(err);
+
+    if (shrinkwrap.cache) shrinkwrap.cache[name] = data;
+    fn(err, data);
+  });
 };
 
 /**
@@ -291,6 +325,16 @@ Shrinkwrap.prototype.dedupe = function dedupe(pkg) {
   });
 
   return pkg;
+};
+
+/**
+ * Clean up any cache of data structures that we might have had laying around.
+ * Making this instance ready for garbage collection.
+ *
+ * @public
+ */
+Shrinkwrap.prototype.destroy = function destroy() {
+  this.registry = this.cache = null;
 };
 
 /**
