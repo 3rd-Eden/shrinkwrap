@@ -12,6 +12,7 @@
   },
   "keywords": [
     "npm",
+    "npmjs",
     "shrinkwrap"
   ],
   "author": "Arnout Kazemier",
@@ -23,7 +24,7 @@
     "async": "0.2.x",
     "debug": "0.7.x",
     "eventemitter3": "0.1.x",
-    "npmjs": "0.0.x",
+    "npm.js": "0.0.x",
     "fusing": "0.0.x"
   }
 }
