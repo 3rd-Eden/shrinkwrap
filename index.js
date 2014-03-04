@@ -1,8 +1,8 @@
 'use strict';
 
-var debug = require('debug')('shrinkwrap')
-  , semver = require('npm.js/semver')
-  , Registry = require('npm.js')
+var semver = require('npm-registry/semver')
+  , debug = require('debug')('shrinkwrap')
+  , Registry = require('npm-registry')
   , fuse = require('fusing')
   , async = require('async');
 
