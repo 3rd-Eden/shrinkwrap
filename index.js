@@ -70,7 +70,7 @@ fuse(Shrinkwrap, require('eventemitter3'));
 Shrinkwrap.prototype.get = function get(name, range, fn) {
   if ('function' === typeof range) {
     fn = range;
-    range = '*';
+    range = 'latest';
   }
 
   var shrinkwrap = this;
