@@ -46,7 +46,9 @@ function Shrinkwrap(options) {
     ? options.mirrors
     : false;
 
-  this.registry = new Registry({
+  this.registry = options.registry instanceof Registry
+    ? options.registry
+    : new Registry({
     registry: options.registry || Registry.mirrors.nodejitsu,
     githulk: options.githulk,
     mirrors: options.mirrors
