@@ -24,6 +24,8 @@ var semver = require('npm-registry/semver')
  * @api public
  */
 function Shrinkwrap(options) {
+  this.fuse();
+
   options = options || {};
 
   options.registry = 'registry' in options
@@ -46,7 +48,7 @@ function Shrinkwrap(options) {
     ? options.mirrors
     : false;
 
-  this.registry = options.registry instanceof Registry
+  this.registry = 'string' !== typeof options.registry
     ? options.registry
     : new Registry({
     registry: options.registry || Registry.mirrors.nodejitsu,
