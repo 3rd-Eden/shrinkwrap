@@ -150,23 +150,11 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
     }
 
     debug('retreiving dependency %s@%s', data.name, data.range);
-    shrinkwrap.releases(data.name, function found(err, packages) {
+    shrinkwrap.release(data.name, data.range, function found(err, pkg, seen) {
       if (err) {
         debug('failed to resolve releases for %s due to %s', data.name, err.message);
         return next(err);
-      }
-
-      var version = semver.maxSatisfying(Object.keys(packages), data.range)
-        , pkg = packages[version];
-
-      //
-      // No matching version for the given module. It could be that the user has
-      // set the range to git dependency instead.
-      //
-      if (!pkg) {
-        debug('Couldnt find the matching version %s in the returned releases for %s', data.range, data.name);
-        return next();
-      }
+      } else if (!pkg) return next();
 
       dependency[_id] = {
         dependent: [data.parent],             // The modules that depend on this version.
@@ -184,7 +172,11 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
       // be resolved.
       //
       data.parent.dependencies[data.name] = dependency[_id];
-      push(shrinkwrap.dedupe(pkg), dependency[_id]);
+
+      if (!seen) {
+        debug('first time weve seen %s searching for its dependencies', data.name);
+        push(shrinkwrap.dedupe(pkg), dependency[_id]);
+      }
 
       next();
     });
@@ -218,7 +210,10 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
  * @api private
  */
 Shrinkwrap.prototype.releases = function releases(name, fn) {
-  if (this.cache && name in this.cache) return fn(undefined, this.cache[name]);
+  if (this.cache && name in this.cache) {
+    debug('CACHEHIT: Retrieving `%s` from cache', name);
+    return fn(undefined, this.cache[name]);
+  }
 
   var shrinkwrap = this;
 
@@ -227,6 +222,45 @@ Shrinkwrap.prototype.releases = function releases(name, fn) {
 
     if (shrinkwrap.cache) shrinkwrap.cache[name] = data;
     fn(err, data);
+  });
+};
+
+/**
+ * Get a single release.
+ *
+ * @param {String} name The name of the module.
+ * @param {String} range The version range.
+ * @param {Function} fn The callback
+ * @api private
+ */
+Shrinkwrap.prototype.release = function release(name, range, fn) {
+  var key = name +'@'+ range
+    , shrinkwrap = this;
+
+  if (this.cache && key in this.cache) {
+    debug('CACHEHIT: Retrieving `%s` from cache', key);
+    return fn(undefined, this.cache[key], true);
+  }
+
+  this.releases(name, function releases(err, packages) {
+    if (err) return fn(err);
+
+    var versions = Object.keys(packages)
+      , version = semver.maxSatisfying(versions, range)
+      , pkg = packages[version];
+
+    //
+    // No matching version for the given module. It could be that the user has
+    // set the range to git dependency instead.
+    //
+    if (!pkg) {
+      debug('Couldnt find the matching version %s in the returned releases for %s', range, name);
+      debug('Only found: %s', versions.join(', '));
+      return fn();
+    }
+
+    if (shrinkwrap.cache) shrinkwrap.cache[key] = pkg;
+    fn(err, pkg, false);
   });
 };
 
