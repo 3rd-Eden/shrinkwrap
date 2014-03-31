@@ -117,13 +117,20 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
    * @api private
    */
   function push(pkg, parent) {
-    if (pkg.dependencies) Object.keys(pkg.dependencies).forEach(function eachpkg(key) {
-      parent.dependencies = parent.dependencies || {};
+    Shrinkwrap.dependencies.forEach(function (depkey) {
+      if ('devDependencies' === depkey && shrinkwrap.production) return;
 
-      queue.push({
-        name: key,
-        parent: parent,
-        range: pkg.dependencies[key]
+      if (
+           'object' === typeof pkg[depkey]
+        && !Array.isArray(pkg[depkey])
+      ) Object.keys(pkg[depkey]).forEach(function eachpkg(key) {
+        parent.dependencies = parent.dependencies || {};
+
+        queue.push({
+          name: key,
+          parent: parent,
+          range: pkg[depkey][key]
+        });
       });
     });
   }
@@ -144,7 +151,10 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
 
     debug('retreiving dependency %s@%s', data.name, data.range);
     shrinkwrap.releases(data.name, function found(err, packages) {
-      if (err) return next(err);
+      if (err) {
+        debug('failed to resolve releases for %s due to %s', data.name, err.message);
+        return next(err);
+      }
 
       var version = semver.maxSatisfying(Object.keys(packages), data.range)
         , pkg = packages[version];
@@ -153,7 +163,10 @@ Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, f
       // No matching version for the given module. It could be that the user has
       // set the range to git dependency instead.
       //
-      if (!pkg) return next();
+      if (!pkg) {
+        debug('Couldnt find the matching version %s in the returned releases for %s', data.range, data.name);
+        return next();
+      }
 
       dependency[_id] = {
         dependent: [data.parent],             // The modules that depend on this version.
