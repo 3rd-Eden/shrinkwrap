@@ -213,8 +213,9 @@ Shrinkwrap.prototype.resolve = function resolve(source, fn) {
     // We've successfully processed all requests.
     //
     if (!spec) {
-      fn(undefined, queue.data, queue.dependencytree);
+      fn(undefined, queue.dependencytree, queue.errors);
 
+      shrinkwrap.destroy();
       return [
         'data',
         'errors',
