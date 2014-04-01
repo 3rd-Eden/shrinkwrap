@@ -21,10 +21,9 @@
     "url": "https://github.com/3rd-Eden/shrinkwrap/issues"
   },
   "dependencies": {
-    "async": "0.2.x",
-    "debug": "0.7.x",
+    "debug": "0.8.x",
     "eventemitter3": "0.1.x",
     "npm-registry": "0.1.x",
-    "fusing": "0.1.x"
+    "fusing": "0.2.x"
   }
 }
