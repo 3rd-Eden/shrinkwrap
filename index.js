@@ -3,8 +3,24 @@
 var semver = require('npm-registry/semver')
   , debug = require('debug')('shrinkwrap')
   , Registry = require('npm-registry')
-  , fuse = require('fusing')
-  , async = require('async');
+  , fuse = require('fusing');
+
+//
+// Variable cache
+//
+var toString = Object.prototype.toString;
+
+/**
+ * Ensure that items in the array are unique.
+ *
+ * @param {Mixed} value A value in the array.
+ * @param {Number} index The index of the item in the array.
+ * @param {Array} arr Reference to the array we're filtering.
+ * @returns {Boolean}
+ */
+function unique(value, index, arr) {
+  return arr.indexOf(value) === index;
+}
 
 /**
  * Generate a new shrinkwrap from a given package or module.
@@ -88,118 +104,155 @@ Shrinkwrap.prototype.get = function get(name, range, fn) {
 };
 
 /**
+ * Get accurate type information for the given JavaScript class.
+ *
+ * @param {Mixed} of The thing who's type class we want to figure out.
+ * @returns {String} lowercase variant of the name.
+ * @api private
+ */
+Shrinkwrap.prototype.type = function type(of) {
+  return toString.call(of).slice(8, -1).toLowerCase();
+};
+
+/**
  * Resolve all dependencies and their versions for the given root package.
  *
  * @param {Object} pkg  Package data from npm.
  * @param {Function} fn Callback
  * @api public
  */
-Shrinkwrap.prototype.resolve = Shrinkwrap.prototype.ls = function resolve(pkg, fn) {
-  pkg = this.dedupe(Array.isArray(pkg) ? pkg.pop() : pkg);
+Shrinkwrap.prototype.resolve = function resolve(source, fn) {
+  source = Array.isArray(source) ? source[0] : source;
 
-  var registry = this.registry
-    , shrinkwrap = this
-    , dependency = {};
+  var shrinkwrap = this;
+
+  /**
+   * Scan the given package.json like structure for possible dependency
+   * locations which will be automatically queued for fetching and processing.
+   *
+   * @param {Object} packages The packages.json body.
+   * @param {Object} ref The location of the new packages in the tree.
+   * @api private
+   */
+  function queue(packages, ref) {
+    packages = shrinkwrap.dedupe(packages);
+
+    Shrinkwrap.dependencies.forEach(function each(key) {
+      if (this.production && 'devDependencies' === key) return;
+      if ('object' !== this.type(packages[key])) return;
+
+      Object.keys(packages[key]).forEach(function each(name) {
+        var range = packages[key][name]
+          , _id = name +'@'+ range;
+
+        ref.dependencies = ref.dependencies || {};
+        queue.push({ name: name, range: range, _id: _id, parents: [ref] });
+      });
+    }, shrinkwrap);
+
+    return queue;
+  }
 
   //
-  // The initial data structure of a shrinkwrapped module.
+  // Our internal data structures that make it possible to search for packages.
   //
-  var data = {
-    name: pkg.name,
-    version: pkg.version
+  queue.dependencytree = Object.create(null);
+  queue.todolist = [];
+  queue.errors = [];
+
+  //
+  // The original root that get's resolved.
+  //
+  queue.data = Object.create(null);
+  queue.data.name = source.name;
+  queue.data.version = source.version;
+
+  /**
+   * Check if we've already processed the specification before processing.
+   *
+   * @param {Object} data Processing specification for the worker.
+   * @api private
+   */
+  queue.push = function push(data) {
+    //
+    // Optimization: prevent queueing the same module lookup.
+    //
+    if (queue.todolist.some(function some(todo) {
+      if (todo._id !== data._id) return false;
+
+      todo.parents = todo.parents.concat(data.parents).filter(unique);
+
+      return true;
+    })) return;
+
+    //
+    // Optimization: It has already been processed and listed before.
+    //
+    if (data._id in queue.dependencytree) {
+      queue.dependencytree[data._id].dependent = (
+        queue.dependencytree[data._id].dependent
+      ).concat(data.parents).filter(unique);
+
+      return shrinkwrap.optimize(queue.dependencytree[data._id]);
+    }
+
+    queue.todolist.push(data);
   };
 
   /**
-   * Push new items in to the queue.
+   * Take an item from the todo list and process it's specification.
    *
-   * @param {Object} pkg The package we need to scan.
-   * @param {Object} parent The location of new packages.
    * @api private
    */
-  function push(pkg, parent) {
-    Shrinkwrap.dependencies.forEach(function (depkey) {
-      if ('devDependencies' === depkey && shrinkwrap.production) return;
+  queue.worker = function worker(err) {
+    if (err) queue.errors.push(err);
 
-      if (
-           'object' === typeof pkg[depkey]
-        && !Array.isArray(pkg[depkey])
-      ) Object.keys(pkg[depkey]).forEach(function eachpkg(key) {
-        parent.dependencies = parent.dependencies || {};
+    var spec = queue.todolist.shift();
 
-        queue.push({
-          name: key,
-          parent: parent,
-          range: pkg[depkey][key]
-        });
+    //
+    // We've successfully processed all requests.
+    //
+    if (!spec) {
+      fn(undefined, queue.data, queue.dependencytree);
+
+      return [
+        'data',
+        'errors',
+        'dependencytree'
+      ].forEach(function cleanup(remove) {
+        delete queue[remove];
       });
-    });
-  }
-
-  var queue = async.queue(function worker(data, next) {
-    var _id = data.name +'@'+ data.range;
-
-    //
-    // @TODO check if we need to move the module upwards to this dependency can
-    // be loaded from a parent folder.
-    //
-    if (_id in dependency) {
-      dependency[_id].dependent.push(data.parent);  // Add it to depended modules.
-      shrinkwrap.optimize(dependency[_id]);         // Optimize module's location.
-
-      return next();
     }
 
-    debug('retreiving dependency %s@%s', data.name, data.range);
-    shrinkwrap.release(data.name, data.range, function found(err, pkg, seen) {
-      if (err) {
-        debug('failed to resolve releases for %s due to %s', data.name, err.message);
-        return next(err);
-      } else if (!pkg) return next();
+    debug('processing %s. %s left to process', spec.name, queue.todolist.length);
 
-      dependency[_id] = {
-        dependent: [data.parent],             // The modules that depend on this version.
-        licenses: pkg.licenses,               // The module's license.
-        license: pkg.license,                 // The module's license.
-        version: pkg.version,                 // Version number.
-        parent: data.parent,                  // The parent which hold this a dependency.
-        released: pkg.date,                   // Publish date of the version.
-        name: pkg.name,                       // Module name, to prevent duplicate.
-        _id: _id                              // _id of the package.
-      };
-
-      //
-      // Add it as dependency and add possible dependency to the queue so it can
-      // be resolved.
-      //
-      data.parent.dependencies[data.name] = dependency[_id];
-
-      if (!seen) {
-        debug('first time weve seen %s searching for its dependencies', data.name);
-        push(shrinkwrap.dedupe(pkg), dependency[_id]);
+    shrinkwrap.release(spec.name, spec.range, function release(err, data, cached) {
+      if (err || !data) {
+        if (err) debug('failed to resolve %s due to error: ', spec.name, err);
+        return worker(err);
       }
 
-      next();
-    });
-  }, this.limit);
+      queue.dependencytree[spec._id] = {
+        dependent: spec.parents,              // The modules that depend on this version.
+        licenses: data.licenses,              // The module's license.
+        license: data.license,                // The module's license.
+        version: data.version,                // Version number.
+        parents: spec.parents,                // The parent which hold this a dependency.
+        released: data.dte,                   // Publish date of the version.
+        name: spec.name,                      // Module name, to prevent duplicate.
+        _id: spec._id                         // _id of the package.
+      };
 
-  //
-  // Fully flushed
-  //
-  queue.drain = function ondrain() {
-    fn(undefined, data, dependency);
+      spec.parents.forEach(function each(parent) {
+        parent.dependencies[spec.name] = queue.dependencytree[spec._id];
+      });
+
+      if (!cached) queue(data, queue.dependencytree[spec._id]);
+      worker();
+    });
   };
 
-  //
-  // Add new dependencies that should be resolved.
-  //
-  if (pkg.dependencies && Object.keys(pkg.dependencies).length) {
-    push(pkg, data);
-  } else {
-    debug('package %s had no dependencies, nothing to shrinkwrap', pkg.name);
-    fn(undefined, data, {});
-  }
-
-  return this;
+  queue(source, queue.data).worker();
 };
 
 /**
@@ -361,7 +414,7 @@ Shrinkwrap.prototype.optimize = function optimize(dependency) {
 Shrinkwrap.prototype.dedupe = function dedupe(pkg) {
   if (!pkg) return pkg;
   if (!pkg.dependencies) return pkg;
-  if (!pkg.devDependencies) return pkg;
+  if (!pkg.devDependencies || this.production) return pkg;
 
   Object.keys(pkg.dependencies).forEach(function searchanddestroy(name) {
     if (!(name in pkg.devDependencies)) return;
