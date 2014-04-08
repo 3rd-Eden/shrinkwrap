@@ -3,10 +3,11 @@
 var semver = require('npm-registry/semver')
   , debug = require('debug')('shrinkwrap')
   , Registry = require('npm-registry')
+  , Module = require('./module')
   , fuse = require('fusing');
 
 //
-// Variable cache
+// Variable cache.
 //
 var toString = Object.prototype.toString;
 
@@ -23,7 +24,7 @@ function unique(value, index, arr) {
 }
 
 /**
- * Generate a new shrinkwrap from a given package or module.
+ * Generate a new Shrinkwrap from a given package or module.
  *
  * Options:
  *
@@ -33,7 +34,7 @@ function unique(value, index, arr) {
  * - optimize: Should we attempt to optimize the data structure in the same way
  *   that npm would have done it.
  * - mirrors: A list of npm mirrors to be used with our registry.
- * - githulk: Optional preconfigured githulk.
+ * - githulk: Optional preconfigured GitHulk.
  *
  * @constructor
  * @param {Object} options Options.
@@ -233,16 +234,9 @@ Shrinkwrap.prototype.resolve = function resolve(source, fn) {
         return worker(err);
       }
 
-      queue.dependencytree[spec._id] = {
-        dependent: spec.parents,              // The modules that depend on this version.
-        licenses: data.licenses,              // The module's license.
-        license: data.license,                // The module's license.
-        version: data.version,                // Version number.
-        parents: spec.parents,                // The parent which hold this a dependency.
-        released: data.dte,                   // Publish date of the version.
-        name: spec.name,                      // Module name, to prevent duplicate.
-        _id: spec._id                         // _id of the package.
-      };
+      var clone = queue.dependencytree[spec._id] = data.module.clone({
+        parents: spec.parents
+      });
 
       spec.parents.forEach(function each(parent) {
         parent.dependencies[spec.name] = queue.dependencytree[spec._id];
@@ -271,11 +265,39 @@ Shrinkwrap.prototype.releases = function releases(name, fn) {
 
   var shrinkwrap = this;
 
-  this.registry.packages.releases(name, function details(err, data) {
+  this.registry.packages.releases(name, function details(err, versions) {
     if (err) return fn(err);
 
-    if (shrinkwrap.cache) shrinkwrap.cache[name] = data;
-    fn(err, data);
+    var keys = Object.keys(versions)
+      , latest = keys.sort(semver.rcompare)[0]
+      , result = { latest: latest };
+
+    //
+    // Map the data to something smaller as we don't need all the package info.
+    //
+    result.releases = keys.reduce(function reduce(memo, key) {
+      var data = versions[key];
+
+      memo[key] = {
+        released: data.time[key],
+        licenses: data.licenses,
+        _npmUser: data._npmUser,
+        version: data.version,
+        name: data.name,
+        latest: latest,
+      };
+
+      Shrinkwrap.dependencies.forEach(function (dep) {
+        memo[key][dep] = data[dep];
+      });
+
+      return memo;
+    }, Object.create(null));
+
+    result.versions = keys;
+
+    if (shrinkwrap.cache) shrinkwrap.cache[name] = result;
+    fn(err, result);
   });
 };
 
@@ -284,7 +306,7 @@ Shrinkwrap.prototype.releases = function releases(name, fn) {
  *
  * @param {String} name The name of the module.
  * @param {String} range The version range.
- * @param {Function} fn The callback
+ * @param {Function} fn The callback.
  * @api private
  */
 Shrinkwrap.prototype.release = function release(name, range, fn) {
@@ -296,25 +318,33 @@ Shrinkwrap.prototype.release = function release(name, range, fn) {
     return fn(undefined, this.cache[key], true);
   }
 
-  this.releases(name, function releases(err, packages) {
+  this.releases(name, function releases(err, result) {
     if (err) return fn(err);
 
-    var versions = Object.keys(packages)
-      , version = semver.maxSatisfying(versions, range)
-      , pkg = packages[version];
+    var version = semver.maxSatisfying(result.versions, range)
+      , data = result.releases[version];
 
     //
     // No matching version for the given module. It could be that the user has
     // set the range to git dependency instead.
     //
-    if (!pkg) {
+    if (!data) {
       debug('Couldnt find the matching version %s in the returned releases for %s', range, name);
-      debug('Only found: %s', versions.join(', '));
+      debug('Only found: %s', result.versions.join(', '));
       return fn();
     }
 
-    if (shrinkwrap.cache) shrinkwrap.cache[key] = pkg;
-    fn(err, pkg, false);
+    //
+    // Transform to a Module instance.
+    //
+    var cache = { module: new Module(data, range) };
+    Shrinkwrap.dependencies.forEach(function (dep) {
+      cache[dep] = data[dep];
+    });
+
+    if (shrinkwrap.cache) shrinkwrap.cache[key] = cache;
+
+    fn(err, cache, false);
   });
 };
 
