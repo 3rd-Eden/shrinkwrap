@@ -269,7 +269,9 @@ Shrinkwrap.prototype.releases = function releases(name, fn) {
     if (err) return fn(err);
 
     var keys = Object.keys(versions)
-      , latest = keys.sort(semver.rcompare)[0]
+      , latest = keys.filter(function valid(ver) {
+          return !!semver.valid(ver);
+        }).sort(semver.rcompare)[0]
       , result = { latest: latest };
 
     //
