@@ -133,9 +133,10 @@ Shrinkwrap.prototype.resolve = function resolve(source, fn) {
    *
    * @param {Object} packages The packages.json body.
    * @param {Object} ref The location of the new packages in the tree.
+   * @param {Number} depth How deep was this package nested
    * @api private
    */
-  function queue(packages, ref) {
+  function queue(packages, ref, depth) {
     packages = shrinkwrap.dedupe(packages);
 
     Shrinkwrap.dependencies.forEach(function each(key) {
@@ -147,7 +148,13 @@ Shrinkwrap.prototype.resolve = function resolve(source, fn) {
           , _id = name +'@'+ range;
 
         ref.dependencies = ref.dependencies || {};
-        queue.push({ name: name, range: range, _id: _id, parents: [ref] });
+        queue.push({
+          name: name,       // Name of the module
+          range: range,     // Semver range
+          _id: _id,         // Semi unique id.
+          parents: [ref],   // Reference to the parent module.
+          depth: depth      // The depth of the reference.
+        });
       });
     }, shrinkwrap);
 
@@ -235,19 +242,20 @@ Shrinkwrap.prototype.resolve = function resolve(source, fn) {
       }
 
       var clone = queue.dependencytree[spec._id] = data.module.clone({
-        parents: spec.parents
+        parents: spec.parents,
+        depth: spec.depth
       });
 
       spec.parents.forEach(function each(parent) {
         parent.dependencies[spec.name] = queue.dependencytree[spec._id];
       });
 
-      if (!cached) queue(data, queue.dependencytree[spec._id]);
+      if (!cached) queue(data, queue.dependencytree[spec._id], spec.depth + 1);
       worker();
     });
   };
 
-  queue(source, queue.data).worker();
+  queue(source, queue.data, 0).worker();
 };
 
 /**

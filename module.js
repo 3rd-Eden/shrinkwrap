@@ -8,9 +8,10 @@ var semver = require('npm-registry/semver');
  * @constructor
  * @param {Object} data The module data.
  * @param {String} range The semver range used to get this version.
+ * @param {Number} depth How deeply nested was this module.
  * @api private
  */
-function Module(data, range) {
+function Module(data, range, depth) {
   this._id = data.name +'@'+ range;     // An unique id that identifies this module.
   this.released = data.released;        // The date this version go released.
   this.licenses = data.licenses;        // The licensing.
@@ -21,6 +22,7 @@ function Module(data, range) {
   this.name = data.name;                // The name of the module.
   this.parents = [];                    // Modules that depend on this version.
   this.dependent = [];                  // Modules that depend on this version.
+  this.depth = depth;                   // The depth of the dependency nesting.
 }
 
 //
@@ -63,7 +65,7 @@ Module.prototype.clone = function clone(data) {
     version: this.version,
     latest: this.latest,
     name: this.name
-  }, this.required);
+  }, this.required, this.depth);
 
   if (data) Object.keys(data).forEach(function each(prop) {
     module[prop] = data[prop];
@@ -89,10 +91,11 @@ Module.prototype.toJSON = function toJSON() {
     pinned: this.pinned,
     author: this.author,
     latest: this.latest,
+    depth: this.depth,
     name: this.name,
     _id: this._id,
 
-    parents: (this.parents || []).map(function map(parent) {
+    parents: (this.parents || this.dependent || []).map(function map(parent) {
       return parent.name +'@'+ parent.version;
     })
   };
