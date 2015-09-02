@@ -1,7 +1,7 @@
 'use strict';
 
-var semver = require('npm-registry/semver')
-  , debug = require('debug')('shrinkwrap')
+var debug = require('diagnostics')('shrinkwrap')
+  , semver = require('npm-registry/semver')
   , Registry = require('npm-registry')
   , Module = require('./module')
   , fuse = require('fusing');
