@@ -476,10 +476,13 @@ Shrinkwrap.prototype.dedupe = function dedupe(pkg) {
  * Clean up any cache of data structures that we might have had laying around.
  * Making this instance ready for garbage collection.
  *
+ * @returns {Boolean}
  * @public
  */
 Shrinkwrap.prototype.destroy = function destroy() {
   this.registry = this.cache = null;
+
+  return true;
 };
 
 /**
